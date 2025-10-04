@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Advanced Bike Telemetry</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.socket.io/4.7.1/socket.io.min.js"></script>
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap');
+
+    @keyframes pulse-green {
+        0% { box-shadow: 0 0 0 0 rgba(0, 255, 127, 0.7); }
+        70% { box-shadow: 0 0 0 10px rgba(0, 255, 127, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(0, 255, 127, 0); }
+    }
+    @keyframes pulse-red {
+        0% { box-shadow: 0 0 0 0 rgba(255, 82, 82, 0.7); }
+        70% { box-shadow: 0 0 0 10px rgba(255, 82, 82, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(255, 82, 82, 0); }
+    }
+
+    :root {
+        --bg-color: #101419;
+        --panel-bg: #1c2128;
+        --border-color: #30363d;
+        --text-primary: #e6edf3;
+        --text-secondary: #7d8590;
+        --accent-green: #00ff7f;
+        --accent-cyan: #00eaff;
+        --accent-red: #ff3366;
+        --font-family: 'Roboto Mono', monospace;
+        --grid-line-color: rgba(255, 255, 255, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+        background-color: var(--bg-color);
+        background-image:
+            linear-gradient(var(--grid-line-color) 1px, transparent 1px),
+            linear-gradient(to right, var(--grid-line-color) 1px, transparent 1px);
+        background-size: 40px 40px;
+        color: var(--text-primary);
+        font-family: var(--font-family);
+        margin: 0;
+        height: 100vh;
+        overflow: hidden;
+    }
+
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: 1fr 350px;
+        grid-template-rows: auto 1fr;
+        grid-template-areas:
+            "header header"
+            "main sidebar";
+        height: 100vh;
+        gap: 1.5rem;
+        padding: 1.5rem;
+    }
+
+    .header {
+        grid-area: header;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border: 2px solid var(--accent-cyan);
+        background-color: var(--panel-bg);
+        padding: 1rem 1.5rem;
+        border-radius: 8px;
+    }
+    .header-title { font-size: 1.5rem; font-weight: 700; margin: 0; color: var(--accent-cyan); }
+    .status-indicator {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 1px;
+    }
+    .status-light { width: 12px; height: 12px; border-radius: 50%; animation-duration: 1.5s; animation-iteration-count: infinite; }
+    .status-light.online { background-color: var(--accent-green); animation-name: pulse-green; }
+    .status-light.alert { background-color: var(--accent-red); animation-name: pulse-red; }
+
+    .main-content { grid-area: main; display: flex; flex-direction: column; gap: 1.5rem; }
+    .chart-panel {
+        background-color: var(--panel-bg);
+        border: 2px solid var(--accent-green);
+        border-radius: 8px;
+        padding: 1rem 1.5rem 1.5rem 1rem;
+        flex-grow: 1;
+        display: flex;
+        flex-direction: column;
+    }
+    .chart-panel .chart-wrapper { position: relative; flex-grow: 1; }
+
+    .sidebar { grid-area: sidebar; display: flex; flex-direction: column; gap: 1.5rem; }
+    .stats-panel {
+        background-color: var(--panel-bg);
+        border: 2px solid var(--accent-cyan);
+        border-radius: 8px;
+        padding: 1.5rem;
+    }
+    .panel-title { font-size: 1rem; font-weight: 700; color: var(--text-secondary); margin: 0 0 1.5rem 0; text-transform: uppercase; letter-spacing: 1px; }
+    .stat-item { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 1rem; }
+    .stat-label { color: var(--text-secondary); }
+    .stat-value { font-size: 1.75rem; font-weight: 700; }
+    .stat-value.green { color: var(--accent-green); }
+    .stat-value.cyan { color: var(--accent-cyan); }
+    .stat-value.red { color: var(--accent-red); }
+    .stat-value .unit { font-size: 1rem; color: var(--text-secondary); margin-left: 0.25rem; }
+
+    #crashOverlay {
+        display: none;
+        position: fixed;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
+        background: rgba(0,0,0,0.85);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        z-index: 1000;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        justify-content: center;
+        align-items: center;
+    }
+    #crashOverlay.visible { display: flex; opacity: 1; }
+    .alert-box {
+        width: 500px;
+        background: var(--panel-bg);
+        border: 2px solid var(--accent-red);
+        border-radius: 8px;
+        text-align: center;
+        padding: 2rem;
+        box-shadow: 0 0 30px rgba(255, 82, 82, 0.7);
+        animation: pulse-red 2s infinite ease-in-out;
+    }
+    .alert-title { color: var(--accent-red); font-size: 2.5rem; font-weight: 700; margin: 0 0 1rem 0; letter-spacing: 2px; text-shadow: 0 0 15px var(--accent-red); }
+    .alert-message { font-size: 1.25rem; margin: 0; color: var(--text-primary); }
+</style>
+</head>
+<body>
+
+<div id="crashOverlay">
+    <div class="alert-box">
+        <h2 class="alert-title">CRITICAL ALERT</h2>
+        <p class="alert-message">IMPACT DETECTED. EMERGENCY PROTOCOL ACTIVATED.</p>
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <header class="header">
+        <h1 class="header-title">ADVANCED BIKE TELEMETRY</h1>
+        <div id="statusIndicator" class="status-indicator">
+            <div class="status-light online"></div>
+            <span>SYSTEMS ONLINE</span>
+        </div>
+    </header>
+
+    <main class="main-content">
+        <div class="chart-panel">
+            <div class="chart-wrapper"><canvas id="accelChart"></canvas></div>
+        </div>
+        <div class="chart-panel">
+            <div class="chart-wrapper"><canvas id="gyroChart"></canvas></div>
+        </div>
+    </main>
+
+    <aside class="sidebar">
+        <div class="stats-panel">
+            <h2 class="panel-title">LIVE DATA</h2>
+            <div class="stat-item">
+                <span class="stat-label">Current G-Force</span>
+                <span id="currentG" class="stat-value green">0.00<span class="unit">G</span></span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Current Rotation</span>
+                <span id="currentDPS" class="stat-value cyan">0.00<span class="unit">dps</span></span>
+            </div>
+        </div>
+        <div class="stats-panel">
+            <h2 class="panel-title">PEAK READINGS</h2>
+            <div class="stat-item">
+                <span class="stat-label">Peak G-Force</span>
+                <span id="peakG" class="stat-value green">0.00<span class="unit">G</span></span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Peak Rotation</span>
+                <span id="peakDPS" class="stat-value cyan">0.00<span class="unit">dps</span></span>
+            </div>
+        </div>
+        <div class="stats-panel">
+            <h2 class="panel-title">RECENT INCIDENTS</h2>
+            <div class="stat-item">
+                <span class="stat-label">Crashes (Last 5 Min)</span>
+                <span id="crashCounter" class="stat-value red">0</span>
+            </div>
+        </div>
+        <div class="stats-panel">
+            <h2 class="panel-title">LAST CRASH</h2>
+            <div class="stat-item">
+                <span class="stat-label">Previous Crash</span>
+                <span id="lastCrashTime" class="stat-value cyan">0</span>
+            </div>
+        </div>
+    </aside>
+</div>
+
+<script>
+const socket = io();
+const currentGElement = document.getElementById('currentG');
+const currentDPSElement = document.getElementById('currentDPS');
+const peakGElement = document.getElementById('peakG');
+const peakDPSElement = document.getElementById('peakDPS');
+const statusIndicator = document.getElementById('statusIndicator');
+const crashOverlay = document.getElementById('crashOverlay');
+const crashCounterElement = document.getElementById('crashCounter');
+const lastCrashTimer = document.getElementById('lastCrashTime');
+
+let peakG = 0, peakDPS = 0;
+let crashTimestamps = [], lastCrashTime = 0;
+const FIVE_MINUTES_MS = 5*60*1000, CRASH_DEBOUNCE_MS = 1000;
+
+function formatTime(timestamp) {
+    if (!timestamp) return "None";
+    const date = new Date(timestamp);
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${hours}:${minutes}:${seconds}`;
+}
+function updateCrashCounter() {
+    const now = Date.now();
+    crashTimestamps = crashTimestamps.filter(ts => now - ts < FIVE_MINUTES_MS);
+    crashCounterElement.textContent = crashTimestamps.length;
+    lastCrashTimer.textContent = formatTime(lastCrashTime);
+}
+
+setInterval(updateCrashCounter, 1000);
+
+Chart.defaults.color = "#ffffff";
+const createGradient = (ctx, hexColor) => {
+    const color = hexToRgb(hexColor);
+    if (!color) return 'rgba(0,0,0,0)';
+    const gradient = ctx.createLinearGradient(0, 0, 0, ctx.canvas.height);
+    gradient.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, 0.35)`);
+    gradient.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0.05)`);
+    return gradient;
+};
+const hexToRgb = (hex) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? { r: parseInt(result[1],16), g: parseInt(result[2],16), b: parseInt(result[3],16) } : null;
+};
+
+const chartOptions = {
+    maintainAspectRatio: false,
+    responsive: true,
+    scales: {
+        y: { grid: { color: 'rgba(255,255,255,0.15)', drawBorder: false }, ticks: { color: "#ffffff", font: { size: 12 } }, beginAtZero: true },
+        x: { grid: { display: false }, ticks: { color: "#ffffff", font: { size: 12 } } }
+    },
+    plugins: {
+        legend: { display: true, position: 'top', align: 'end', labels: { color: "#ffffff", boxWidth: 15, font: { size: 14 } } },
+        tooltip: { backgroundColor: 'rgba(0,0,0,0.7)', titleColor: '#00eaff', bodyColor: '#e6edf3', borderColor: '#30363d', borderWidth: 1 }
+    },
+    elements: { line: { borderWidth: 2 } },
+    animation: { duration: 250, easing: 'linear' }
+};
+
+// Setup charts
+const maxPoints = 50;
+const accelCanvas = document.getElementById('accelChart');
+const gyroCanvas = document.getElementById('gyroChart');
+
+const accelData = {
+    labels: [], datasets: [{ label: "Acceleration", data: [], borderColor: "var(--accent-green)", backgroundColor: createGradient(accelCanvas.getContext('2d'), getComputedStyle(document.documentElement).getPropertyValue('--accent-green')), tension: 0.4, fill: true, pointRadius: 0 }]
+};
+const gyroData = {
+    labels: [], datasets: [{ label: "Rotation", data: [], borderColor: "var(--accent-cyan)", backgroundColor: createGradient(gyroCanvas.getContext('2d'), getComputedStyle(document.documentElement).getPropertyValue('--accent-cyan')), tension: 0.4, fill: true, pointRadius: 0 }]
+};
+
+const accelChart = new Chart(accelCanvas, { type: 'line', data: accelData, options: chartOptions });
+const gyroChart = new Chart(gyroCanvas, { type: 'line', data: gyroData, options: chartOptions });
+
+// Socket data handler
+socket.on('sensor_data', function(msg) {
+    const parts = msg.split(',');
+    if(parts.length < 7) return;
+
+    const ax=parseFloat(parts[0]), ay=parseFloat(parts[1]), az=parseFloat(parts[2]);
+    const gx=parseFloat(parts[3]), gy=parseFloat(parts[4]), gz=parseFloat(parts[5]);
+    const status = parts[6].trim();
+
+    if([ax, ay, az, gx, gy, gz].some(isNaN)) return;
+
+    const accelMag = Math.sqrt(ax*ax + ay*ay + az*az);
+    const gyroMag = Math.sqrt(gx*gx + gy*gy + gz*gz);
+    const now = new Date().toLocaleTimeString('en-IN', {hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
+
+    [accelData, gyroData].forEach((dataObj, index) => {
+        const chart = index===0 ? accelChart : gyroChart;
+        const value = index===0 ? accelMag : gyroMag;
+        dataObj.labels.push(now);
+        dataObj.datasets[0].data.push(value);
+        if(dataObj.labels.length > maxPoints){ dataObj.labels.shift(); dataObj.datasets[0].data.shift(); }
+        chart.update('none');
+    });
+
+    currentGElement.innerHTML = `${accelMag.toFixed(2)}<span class="unit">G</span>`;
+    currentDPSElement.innerHTML = `${gyroMag.toFixed(2)}<span class="unit">dps</span>`;
+
+    if(accelMag > peakG){ peakG = accelMag; peakGElement.innerHTML = `${peakG.toFixed(2)}<span class="unit">G</span>`; }
+    if(gyroMag > peakDPS){ peakDPS = gyroMag; peakDPSElement.innerHTML = `${peakDPS.toFixed(2)}<span class="unit">dps</span>`; }
+
+    const isCrash = status === "CRASH";
+    crashOverlay.classList.toggle('visible', isCrash);
+    const statusLight = statusIndicator.querySelector('.status-light');
+    const statusText = statusIndicator.querySelector('span');
+
+    if(isCrash){
+        statusLight.className = 'status-light alert';
+        statusText.textContent = 'CRITICAL ALERT';
+        const nowTime = Date.now();
+        if(nowTime - lastCrashTime > CRASH_DEBOUNCE_MS){
+            crashTimestamps.push(nowTime);
+            lastCrashTime = nowTime;
+            updateCrashCounter();
+        }
+    } else {
+        statusLight.className = 'status-light online';
+        statusText.textContent = 'SYSTEMS ONLINE';
+    }
+});
+</script>
+</body>
+</html>
