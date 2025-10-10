@@ -1,0 +1,90 @@
+# BlackBox for Motorcycles: An IoT & Web Telemetry Project
+
+This project is an **Arduino + Python Flask application** that functions as a comprehensive black box and real-time telemetry system for motorcycles. It serves as a practical implementation of an IoT device that captures critical ride data and visualizes it through a live, web-based dashboard.
+
+The system is designed to detect crashes, log the moments leading up to an incident, and stream live sensor data to a monitoring interface. The single-page frontend uses WebSockets to render the bike's status in real-time, making it an effective tool for both safety monitoring and performance analysis.
+
+---
+
+## Core Features
+
+* **Real-Time Telemetry Dashboard:** An advanced web interface displays live G-force and rotation data through dynamic, scrolling line charts.
+* **Automatic Crash Detection:** The embedded system uses an accelerometer and gyroscope to automatically detect impacts based on G-force thresholds.
+* **Pre-Incident Data Logging:** A circular buffer on the device ensures that the last few seconds of sensor data are always stored in memory, ready to be saved.
+* **Emergency Data Save:** Upon crash detection, the buffered data is immediately written to a CSV file on an SD card for post-accident analysis.
+* **Live Incident Tracking:** The dashboard includes panels for peak readings, a counter for recent incidents, and a full-screen critical alert overlay on impact.
+
+---
+
+## Technology Stack
+
+* **Embedded Hardware:** Arduino UNO, ADXL335 Accelerometer, L3G4200D Gyroscope.
+* **Embedded Toolchain:** **PlatformIO** (programmed in C++).
+* **Backend:** Python, Flask, Flask-SocketIO.
+* **Frontend:** HTML5, CSS3, JavaScript (ES6+), Chart.js, Socket.IO.
+
+---
+
+## Running Locally
+
+This project has two main components that need to be run: the embedded code on the Arduino and the Flask web server.
+
+### 1. Embedded Device (PlatformIO) Setup
+
+Your project uses **PlatformIO**, which manages the toolchain and libraries for you. The easiest way to run this is with VS Code.
+
+#### Prerequisites
+
+* **Visual Studio Code**
+* **PlatformIO IDE extension** for VS Code.
+
+#### Instructions
+
+1.  Open the entire project folder (the root `BlackBoxMotorcycle` directory) in Visual Studio Code.
+2.  The PlatformIO extension will automatically recognize the `platformio.ini` file and set up the project. It will prompt you to install any necessary platforms or libraries.
+3.  Connect your Arduino UNO to your computer via USB.
+4.  Once PlatformIO is ready, click the **"Upload"** button (an arrow icon →) in the PlatformIO toolbar on the blue bottom status bar of VS Code. This will build the project and flash it to your Arduino.
+
+
+### 2. Flask Web Dashboard Setup
+
+The Flask server is run from the root of the project directory.
+
+#### Prerequisites
+
+* **Python 3.x**
+
+#### Instructions
+
+1.  **Navigate to the project directory:**
+    Open a terminal and make sure you are in the root `BlackBoxMotorcycle` directory (the one containing `app.py`).
+
+2.  **Install dependencies:**
+    Install the required Python libraries using pip.
+    ```bash
+    pip install Flask Flask-SocketIO pyserial
+    ```
+    *(Note: Added `pyserial` as it's likely needed to read from the Arduino)*.
+
+3.  **Run the application:**
+    Start the backend server. Make sure to check inside `app.py` that the serial port is correct for your system.
+    ```bash
+    python app.py
+    ```
+
+4.  **View the application:**
+    Open your browser at [http://localhost:5000](http://localhost:5000).
+
+---
+
+## System Architecture
+
+The Arduino device continuously reads sensor data. This data is written to the serial port and simultaneously stored in an onboard memory buffer. The Python Flask backend reads the data from the serial port and uses Socket.IO to broadcast it to all connected web clients in real-time. If the Arduino detects a crash, it saves its memory buffer to an SD card and sends a "CRASH" status to the backend, which triggers the alert on the web dashboard.
+
+---
+
+## Project Team Members
+
+* [Lohit G](https://github.com/zappvik)
+* [Sanjith S J](https://github.com/BETTlM)
+* [Madhan M](https://github.com/MMADHANCSE)
